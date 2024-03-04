@@ -1,0 +1,50 @@
+---
+version: 0.2
+env:
+  git-credential-helper: yes
+phases:
+  install:
+    commands:
+      - git log -1 --stat > .pullfile
+      - var=$(cat .pullfile | grep -w 'commit')
+      - var1=`echo $var | cut -d " " -f 2` && var2=$(echo $GIT_LINK | sed 's@APP_NAME@'"$APP_NAME"'@' | sed 's@ID@'"$var1"'@')
+      - export var4=$(echo $var1 | sed 's/$/`/' | sed 's/^/`/')
+      - |
+        if [ "$ENVIRONMENT_NAME" = "dev" ]; then
+          aws secretsmanager get-secret-value --region $REGION_NAME --secret-id development-pipeline-template-messages --query SecretString --output text | sed 's/{"//g' | sed 's/"}//g' | sed 's/":"/=/g' | sed 's/","/\n/g' >> .env.mess
+          chmod 777 .env.mess
+          sed -i 's@DEPLOYMENT_NAME@'"$DEPLOYMENT_NAME"'@' .env.mess && sed -i 's/^......//' .env.mess && sed -i 's@gitcommit@'"$var1"'@' .env.mess
+          mess23=$(sed -n 23p .env.mess | sed 's/^.//') && mess24=$(sed -n 24p .env.mess | sed 's/^.//')
+        else
+          aws secretsmanager get-secret-value --region $REGION_NAME --secret-id prod-pipeline-template-messages --query SecretString --output text | sed 's/{"//g' | sed 's/"}//g' | sed 's/":"/=/g' | sed 's/","/\n/g' >> .env.mess
+          chmod 777 .env.mess
+          sed -i 's@DEPLOYMENT_NAME@'"$DEPLOYMENT_NAME"'@' .env.mess && sed -i 's/^......//' .env.mess && sed -i 's@gitcommit@'"$var1"'@' .env.mess
+          mess23=$(sed -n 19p .env.mess | sed 's/^.//') && mess24=$(sed -n 20p .env.mess | sed 's/^.//')
+        fi
+      - aws sts get-caller-identity
+      - curl -sS -o aws-iam-authenticator https://amazon-eks.s3-$REGION_NAME.amazonaws.com/1.10.3/2018-07-26/bin/linux/amd64/aws-iam-authenticator
+      - curl -sS -o kubectl https://amazon-eks.s3-$REGION_NAME.amazonaws.com/1.14.6/2019-08-22/bin/linux/amd64/kubectl
+      - chmod +x ./kubectl ./aws-iam-authenticator
+      - curl https://get.helm.sh/helm-v3.8.2-linux-amd64.tar.gz -o helm.tar.gz
+      - tar -zxvf helm.tar.gz
+      - mv linux-amd64/helm /usr/local/bin/helm
+      - export PATH=$PWD/:$PATH
+  post_build:
+    commands:
+      - export KUBECONFIG=$HOME/.kube/config
+      - CREDENTIALS=$(aws sts assume-role --role-arn $EKS_KUBECTL_ROLE_ARN --role-session-name codebuild-kubectl --duration-seconds 900)
+      - export AWS_ACCESS_KEY_ID="$(echo ${CREDENTIALS} | jq -r '.Credentials.AccessKeyId')"
+      - export AWS_SECRET_ACCESS_KEY="$(echo ${CREDENTIALS} | jq -r '.Credentials.SecretAccessKey')"
+      - export AWS_SESSION_TOKEN="$(echo ${CREDENTIALS} | jq -r '.Credentials.SessionToken')"
+      - export AWS_EXPIRATION=$(echo ${CREDENTIALS} | jq -r '.Credentials.Expiration')
+      - aws eks update-kubeconfig --name $EKS_CLUSTER_NAME
+      - helm upgrade -f $HELM_APP_TYPE/values.yaml $DEPLOYMENT_NAME $HELM_APP_TYPE/ -i --history-max 3 -n $NAME_SPACE
+      - sleep 60
+      - echo $var
+      - |
+        echo $var4 $var2 $mess23 $mess24 $DEPLOYMENT_NAME $SLACK_WEBHOOK $VAR3
+        curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess23"'\n'"$mess24 - $var4"'. <'"$var2"'|View details>  "}]}' $SLACK_WEBHOOK
+      - rm .env.mess
+      - printf '[{"name":"eks-deployment","imageUri":"%s"}]' $REPOSITORY_URI:$TAG > build.json
+artifacts:
+  files: build.json
