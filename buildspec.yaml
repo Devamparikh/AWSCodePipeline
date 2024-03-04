@@ -1,0 +1,116 @@
+---
+version: 0.2
+env:
+  git-credential-helper: yes
+phases:
+  install:
+    commands:
+      - echo getting all varibale value from AWS Secret Manager && echo $CODEBUILD_BUILD_ID
+      - aws --version
+      - curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+      - chmod 700 get_helm.sh
+      - bash get_helm.sh
+      - aws secretsmanager get-secret-value --region $REGION_NAME --secret-id $SECRET_ID --query SecretString --output text | sed 's/{"//g' | sed 's/"}//g' | sed 's/":"/=/g' | sed 's/","/\n/g' >> .env.dev
+      - export $(xargs <.env.dev)
+      - export ENVIRONMENT_LOWER=$(echo "$ENVIRONMENT" | awk '{print tolower($0)}')
+      - aws ssm get-parameter --region $REGION_NAME --name "/$ENVIRONMENT_LOWER/engineering/devops/configs/ci-cd/chartvalues" --query "Parameter.Value" --with-decryption --output text > .chartvalues 
+      - export $(grep -v '^#' .chartvalues | xargs)
+      - pwd
+      - git log -1 --stat > .pullfile
+      - var=$(cat .pullfile | grep -w 'commit')
+      - GIT_DEFAULT_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*://p' | xargs)
+      - echo $GIT_DEFAULT_BRANCH
+      - var1=`echo $var | cut -d " " -f 2` && var2=$(echo $GIT_LINK | sed 's@APP_NAME@'"$APP_NAME"'@' | sed 's@ID@'"$var1"'@')
+      - var3=$(echo $BUILD_LINK | sed 's@ID@'"$CODEBUILD_BUILD_ID"'@' | sed 's/:/%3A/2')
+      - var6=$(cat .pullfile | grep -w 'Merge pull') || echo $var6
+      - export var4=$(echo $var1 | sed 's/$/`/' | sed 's/^/`/')
+      - echo $var $var1 $var2 $var3
+      - |
+        echo $var $SECRET_ID $APP_NAME $DEPLOYMENT_NAME $ENVIRONMENT_NAME $SLACK_WEBHOOK $THRESHOLD > /dev/null
+        export $(xargs <.env.dev)
+        if [ "$ENVIRONMENT_NAME" = "dev" ]; then
+          aws secretsmanager get-secret-value --region $REGION_NAME --secret-id development-pipeline-template-messages --query SecretString --output text | sed 's/{"//g' | sed 's/"}//g' | sed 's/":"/=/g' | sed 's/","/\n/g' >> .env.mess
+          chmod 777 .env.mess
+          sed -i 's@DEPLOYMENT_NAME@'"$DEPLOYMENT_NAME"'@' .env.mess && sed -i 's/^......//' .env.mess && sed -i 's@gitcommit@'"$var1"'@' .env.mess 
+          mess1=$(sed -n 1p .env.mess) && mess2=$(sed -n 2p .env.mess) && mess3=$(sed -n 3p .env.mess) && mess4=$(sed -n 4p .env.mess) && mess5=$(sed -n 5p .env.mess) && mess6=$(sed -n 6p .env.mess) && mess7=$(sed -n 7p .env.mess) && mess8=$(sed -n 8p .env.mess)
+          mess9=$(sed -n 9p .env.mess) && mess10=$(sed -n 10p .env.mess | sed 's/^.//') && mess11=$(sed -n 11p .env.mess | sed 's/^.//') && mess12=$(sed -n 12p .env.mess | sed 's/^.//') && mess13=$(sed -n 13p .env.mess | sed 's/^.//') && mess14=$(sed -n 14p .env.mess | sed 's/^.//') && mess15=$(sed -n 15p .env.mess | sed 's/^.//') && mess16=$(sed -n 16p .env.mess | sed 's/^.//') && mess17=$(sed -n 17p .env.mess | sed 's/^.//') && mess18=$(sed -n 18p .env.mess | sed 's/^.//') && mess19=$(sed -n 19p .env.mess | sed 's/^.//') && mess20=$(sed -n 20p .env.mess | sed 's/^.//') && mess21=$(sed -n 21p .env.mess | sed 's/^.//') && mess22=$(sed -n 22p .env.mess | sed 's/^.//') 
+          curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess1"'\n'"$mess2"' "}]}' $SLACK_WEBHOOK
+        else
+          aws secretsmanager get-secret-value --region $REGION_NAME --secret-id prod-pipeline-template-messages --query SecretString --output text | sed 's/{"//g' | sed 's/"}//g' | sed 's/":"/=/g' | sed 's/","/\n/g' >> .env.mess
+          chmod 777 .env.mess
+          sed -i 's@DEPLOYMENT_NAME@'"$DEPLOYMENT_NAME"'@' .env.mess && sed -i 's/^......//' .env.mess && sed -i 's@gitcommit@'"$var1"'@' .env.mess
+          mess1=$(sed -n 1p .env.mess) && mess2=$(sed -n 2p .env.mess) && mess7=$(sed -n 3p .env.mess) && mess8=$(sed -n 4p .env.mess)
+          mess9=$(sed -n 5p .env.mess) && mess10=$(sed -n 6p .env.mess | sed 's/^.//') && mess11=$(sed -n 7p .env.mess | sed 's/^.//') && mess12=$(sed -n 8p .env.mess | sed 's/^.//') && mess13=$(sed -n 9p .env.mess | sed 's/^.//') && mess14=$(sed -n 10p .env.mess | sed 's/^.//') && mess15=$(sed -n 11p .env.mess | sed 's/^.//') && mess16=$(sed -n 12p .env.mess | sed 's/^.//') && mess17=$(sed -n 13p .env.mess | sed 's/^.//') && mess18=$(sed -n 14p .env.mess | sed 's/^.//') && mess19=$(sed -n 15p .env.mess | sed 's/^.//') && mess20=$(sed -n 16p .env.mess | sed 's/^.//') && mess21=$(sed -n 17p .env.mess | sed 's/^.//') && mess22=$(sed -n 18p .env.mess | sed 's/^.//')
+          curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess1"'\n'"$mess2"' "}]}' $SLACK_WEBHOOK
+        fi
+      - echo Logging in to Amazon ECR
+      - aws sts get-caller-identity
+      - aws ecr get-login-password --region $REGION_NAME | docker login --username AWS --password-stdin $REPOSITORY_URI
+      - export PATH=$PWD/:$PATH
+  pre_build:
+      commands:
+        - echo $var
+        - echo $GIT_DEFAULT_BRANCH
+        - |
+        - |
+          echo $var6
+          echo $REPOSITORY_URI $APP_NAME $NAME_SPACE $PROBE_ENDPOINT $ENVIRONMENT_NAME $DEPLOYMENT_FILE $GIT_USER $SLACK_WEBHOOK $VAR3 $GIT_DEFAULT_BRANCH $var1 $GIT_TOKEN > /dev/null
+          if [ "$ENVIRONMENT_NAME" = "dev" ]; then
+            docker pull hadolint/hadolint && for f in .docker/*; do echo "$f" | cut -c 9- && docker run --rm -i hadolint/hadolint < $f; done
+            if [ $? -eq 0 ]; then (echo "✓ Dockerfile linting completed for $APP_NAME " && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess3"'\n'"$mess4"' "}]}' $SLACK_WEBHOOK && exit 0); else (echo "Dockerfile linting failed for $APP_NAME " && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#e09f1e", "text":" '"$mess5"'\n'"$mess6"' <'"$var3"'|View details> "}]}' $SLACK_WEBHOOK && exit 0); fi
+          else
+            echo "This is $ENVIRONMENT_NAME enviroment. So code scanning will not be done." 
+          fi
+        - |
+          echo $REPOSITORY_URI $APP_NAME $NAME_SPACE $PROBE_ENDPOINT $THRESHOLD $GIT_USER $GIT_TOKEN $ENVIRONMENT_NAME $DEPLOYMENT_FILE $SLACK_WEBHOOK $VAR3 > /dev/null
+          docker build --build-arg GIT_TOKEN=$GIT_TOKEN --build-arg GIT_USER=$GIT_USER -f ./.docker/Dockerfile.testcase --tag $REPOSITORY_URI:testcase . > temp.log
+          if [ $? -eq 0 ]; then (cat temp.log && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess7"'\n'"$mess8"' "}]}' $SLACK_WEBHOOK && exit 0); else (echo "Testcase failed for $APP_NAME " && cat temp.log && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#E01E5A", "text":" '"$mess9"'\n'"$mess10"' <'"$var3"'|View details> "}]}' $SLACK_WEBHOOK && exit 1); fi         
+        - |
+          coverage=$(cat temp.log | grep Average | cut -d ' ' -f 4 | sed 's/.$//' | sed 's/\.[^[:blank:]]*//')
+          var5=$(cat temp.log | grep Average | cut -d ' ' -f 4)
+          mess12=$(echo $mess12 | sed 's@var5@'"$var5"'@') && mess14=$(echo $mess14 | sed 's@var5@'"$var5"'@' | sed 's@THRESHOLD@'"$THRESHOLD%"'@')
+          if [ "$coverage" -gt $THRESHOLD  ]; then (echo "✓ Testcase completed successfully for $APP_NAME " && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess11"'\n'"$mess12"' "}]}' $SLACK_WEBHOOK && exit 0); else (echo "Testcase failed for $APP_NAME " && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#E01E5A", "text":" '"$mess13"'\n'"$mess14"' <'"$var3"'|View details> "}]}' $SLACK_WEBHOOK && exit 1); fi
+        - helm pull oci://$HELM_CHART_REPOSITORY_URI/$HELM_APP_TYPE --version $BACKEND_HELM_VERSION
+        - tar -xvf *.tgz
+        - cp .k8s/values.yaml $HELM_APP_TYPE/
+        - cd $HELM_APP_TYPE
+        - git checkout $(echo "$ENVIRONMENT" | awk '{print tolower($0)}') && TAG="$ENVIRONMENT_NAME-$(git tag --merged $(echo "$ENVIRONMENT" | awk '{print tolower($0)}') -n5 --format='%(refname) %(taggerdate)' --sort=-creatordate | head -1 | awk '{print $1}' | awk -F'/' '{print $3}')"
+        - sed -i 's@CONTAINER_IMAGE@'"$REPOSITORY_URI:$TAG"'@' values.yaml
+        - sed -i 's@SSC_PASS@'"$SSC_PASS"'@' values.yaml
+        - sed -i 's@APP_VERSION@'"$TAG"'@' Chart.yaml
+        - sed -i 's@DEPLOYMENT_NAME@'"$DEPLOYMENT_NAME"'@' values.yaml
+        - sed -i 's@TRACK@'"$TRACK"'@' values.yaml
+        - sed -i 's@REPLICAS_COUNT@'"$REPLICAS_COUNT"'@' values.yaml
+        - sed -i 's@NAME_SPACE@'"$NAME_SPACE"'@' values.yaml
+        - sed -i 's@CPU_LIMITS@'"$CPU_LIMITS"'@' values.yaml
+        - sed -i 's@MEMORY_LIMITS@'"$MEMORY_LIMITS"'@' values.yaml
+        - sed -i 's@CPU_REQUESTS@'"$CPU_REQUESTS"'@' values.yaml
+        - sed -i 's@MEMORY_REQUESTS@'"$MEMORY_REQUESTS"'@' values.yaml
+        - sed -i 's@APP_NAME@'"$APP_NAME"'@' values.yaml
+        - sed -i 's@K8S_SECRET@'"$K8S_SECRET"'@' values.yaml
+        - sed -i 's@K8S_CONFIG@'"$K8S_CONFIG"'@' values.yaml
+        - sed -i 's@MAX_SURGE@'"$MAX_SURGE"'@' values.yaml
+        - sed -i 's@MAX_UNAVAILABLE@'"$MAX_UNAVAILABLE"'@' values.yaml
+        - sed -i 's@AVG_UTILIZATION@'"$AVG_UTILIZATION"'@' values.yaml
+        - cat values.yaml && cd ..
+  build:
+    commands:
+      - |
+        echo $APP_NAME $ENVIRONMENT_NAME
+        if [ "$ENVIRONMENT_NAME" == "prod" ]; then APM_NAME=`echo $DEPLOYMENT_NAME`; elif [ "$ENVIRONMENT_NAME" == "staging" ]; then APM_NAME=`echo $DEPLOYMENT_NAME-staging`; else APM_NAME=`echo $DEPLOYMENT_NAME-development`; fi
+        docker build --build-arg GIT_TOKEN=$GIT_TOKEN --build-arg GIT_USER=$GIT_USER --build-arg ENVIRONMENT=$ENVIRONMENT --build-arg APM_NAME=$APM_NAME --build-arg ENVIRONMENT_NAME=$ENVIRONMENT_NAME --build-arg NEW_RELIC_KEY=$NEW_RELIC_KEY --build-arg APP_NAME=$APP_NAME -f ./.docker/Dockerfile --tag $REPOSITORY_URI:$TAG .
+        if [ $? -eq 0 ]; then (echo "✓ Container image created successfully for $APP_NAME" && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess15"'\n'"$mess16"' "}]}' $SLACK_WEBHOOK && exit 0); else (echo "Failed to create container image for $APP_NAME" && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#E01E5A", "text":" '"$mess17"'\n'"$mess18"' <'"$var3"'|View details> "}]}' $SLACK_WEBHOOK && exit 1); fi
+  post_build:
+    commands:
+      - |
+        if [ /"$CODEBUILD_BUILD_SUCCEEDING/" == /"0/" ]; then exit 1; fi
+        git checkout $(echo "$ENVIRONMENT" | awk '{print tolower($0)}') && tag="$(git tag --merged $(echo "$ENVIRONMENT" | awk '{print tolower($0)}') -n5 --format='%(refname) %(taggerdate)' --sort=-creatordate | head -1 | awk '{print $1}' | awk -F'/' '{print $3}')"
+        mess20=$(echo $mess20 | sed 's@tag@'"$tag"'@') && mess22=$(echo $mess22 | sed 's@tag@'"$tag"'@')
+        docker push $REPOSITORY_URI:$TAG
+        if [ $? -eq 0 ]; then (echo "✓ Tag created successfully for $APP_NAME" && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#2eb886", "text":" '"$mess19"'\n'"$mess20"' "}]}' $SLACK_WEBHOOK && exit 0); else (echo "Latest tag not available for $APP_NAME" && curl -X POST -H 'Content-type: application/json' --data '{"attachments": [{"color": "#E01E5A", "text":" '"$mess21"'\n'"$mess22"' <'"$var3"'|View details> "}]}' $SLACK_WEBHOOK && exit 1); fi
+      - rm .env.mess .env.dev
+      - cd $HELM_APP_TYPE
+      - helm template . -f values.yaml > ../manifest.yaml
+artifacts:
+  files:
+    - './**/*'
